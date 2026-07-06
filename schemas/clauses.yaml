@@ -1,0 +1,33 @@
+table: clauses
+description: >
+  One row per clause type ACTUALLY PRESENT in a contract -- there is no
+  "absent" marker, so "missing X" must be computed as an anti-join.
+
+columns:
+  - name: clause_id
+    type: STRING
+    description: Primary key.
+  - name: contract_id
+    type: STRING
+    description: Foreign key -> contracts.contract_id.
+  - name: clause_type
+    type: STRING
+    description: >
+      Limitation of Liability, Indemnification, Confidentiality, Termination
+      for Convenience, Auto-Renewal, Governing Law, Data Protection,
+      Non-Compete, Assignment, Force Majeure, Arbitration, Most Favored
+      Nation, or Exclusivity.
+  - name: is_nonstandard
+    type: BOOL
+    description: Flagged as deviating from the standard playbook.
+  - name: summary
+    type: STRING
+
+rules:
+  - >
+    CLAUSE PRESENCE MODEL: to find contracts MISSING a clause type, use an
+    anti-join: NOT EXISTS (SELECT 1 FROM clauses cl WHERE cl.contract_id =
+    c.contract_id AND cl.clause_type = 'X') or a LEFT JOIN ... WHERE
+    cl.clause_id IS NULL. NEVER use clause_type != 'X' -- that matches
+    contracts that have a *different* clause, not contracts lacking the
+    clause entirely.

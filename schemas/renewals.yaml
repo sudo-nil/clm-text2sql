@@ -1,0 +1,21 @@
+table: renewals
+description: Renewal / lifecycle events for a contract.
+
+columns:
+  - name: renewal_id
+    type: STRING
+    description: Primary key.
+  - name: contract_id
+    type: STRING
+    description: Foreign key -> contracts.contract_id.
+  - name: renewal_date
+    type: DATE
+  - name: renewal_type
+    type: STRING
+    description: Auto, Negotiated, or Non-Renewed.
+  - name: new_expiration_date
+    type: DATE
+    description: Nullable.
+  - name: value_change
+    type: NUMERIC
+    description: Nullable.

@@ -1,0 +1,39 @@
+table: counterparties
+description: External parties the company contracts with.
+
+columns:
+  - name: counterparty_id
+    type: STRING
+    description: Primary key.
+  - name: name
+    type: STRING
+    description: Casual display name, e.g. "Acme Global".
+  - name: legal_name
+    type: STRING
+    description: >
+      ALL-CAPS legal name with entity suffix, e.g. "ACME GLOBAL LLC". Will
+      not literally equal a casual name -- see rules below.
+  - name: entity_type
+    type: STRING
+    description: LLC, Inc., GmbH, Ltd., PLC, or S.A.
+  - name: jurisdiction
+    type: STRING
+    description: US state or country of incorporation.
+  - name: country
+    type: STRING
+  - name: industry
+    type: STRING
+  - name: risk_tier
+    type: STRING
+    description: Low, Medium, or High.
+
+rules:
+  - >
+    NAME MATCHING: to match a company by a casual name, compare
+    case-insensitively and allow the name to appear as a substring of either
+    `name` or `legal_name`, e.g.
+    UPPER(name) LIKE '%ACME%' OR UPPER(legal_name) LIKE '%ACME%'.
+  - >
+    A single brand can correspond to MULTIPLE counterparty_id rows (regional
+    entities) -- do not assume one casual name maps to exactly one
+    counterparty_id.

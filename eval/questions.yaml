@@ -1,0 +1,239 @@
+# Eval questions for the CLM text-to-SQL agent.
+#
+# gold_sql uses `{dataset}` as a placeholder for the configured BQ_DATASET,
+# substituted by eval/run.py. Tiers: filters, joins, advanced, traps.
+questions:
+  # --- filters --------------------------------------------------------------
+  - id: filters-01
+    tier: filters
+    question: "How many contracts are governed by California law?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.contracts`
+      WHERE governing_law = 'California'
+
+  - id: filters-02
+    tier: filters
+    question: "How many counterparties are classified as High risk tier?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.counterparties`
+      WHERE risk_tier = 'High'
+
+  - id: filters-03
+    tier: filters
+    question: "How many contracts are denominated in EUR?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.contracts`
+      WHERE currency = 'EUR'
+
+  - id: filters-04
+    tier: filters
+    question: "How many counterparties are incorporated in Germany?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.counterparties`
+      WHERE country = 'Germany'
+
+  - id: filters-05
+    tier: filters
+    question: "How many obligations are still open?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.obligations`
+      WHERE status = 'Open'
+
+  # --- joins ------------------------------------------------------------------
+  - id: joins-01
+    tier: joins
+    question: "Which business unit owns the most MSAs? Show the business unit name and the count."
+    gold_sql: |
+      SELECT bu.name, COUNT(*) AS msa_count
+      FROM `{dataset}.contracts` c
+      JOIN `{dataset}.business_units` bu USING (business_unit_id)
+      WHERE c.contract_type = 'MSA'
+      GROUP BY bu.name
+      ORDER BY msa_count DESC
+      LIMIT 1
+
+  - id: joins-02
+    tier: joins
+    question: "List the full name and obligation description for every overdue obligation owned by a Legal Counsel."
+    gold_sql: |
+      SELECT u.full_name, o.description
+      FROM `{dataset}.obligations` o
+      JOIN `{dataset}.users` u ON o.owner_user_id = u.user_id
+      WHERE o.status = 'Overdue' AND u.role = 'Legal Counsel'
+
+  - id: joins-03
+    tier: joins
+    question: "How many contracts are linked to each matter type?"
+    gold_sql: |
+      SELECT m.matter_type, COUNT(*) AS contract_count
+      FROM `{dataset}.contracts` c
+      JOIN `{dataset}.matters` m USING (matter_id)
+      GROUP BY m.matter_type
+
+  - id: joins-04
+    tier: joins
+    question: "How many contracts do we hold with counterparties in each risk tier?"
+    gold_sql: |
+      SELECT cp.risk_tier, COUNT(*) AS contract_count
+      FROM `{dataset}.contracts` c
+      JOIN `{dataset}.counterparties` cp USING (counterparty_id)
+      GROUP BY cp.risk_tier
+
+  - id: joins-05
+    tier: joins
+    question: "How many contracts does each business-unit region manage?"
+    gold_sql: |
+      SELECT bu.region, COUNT(*) AS contract_count
+      FROM `{dataset}.contracts` c
+      JOIN `{dataset}.business_units` bu USING (business_unit_id)
+      GROUP BY bu.region
+
+  - id: joins-06
+    tier: joins
+    question: "List the display name of every counterparty that has had a contract non-renewed."
+    gold_sql: |
+      SELECT DISTINCT cp.name
+      FROM `{dataset}.renewals` r
+      JOIN `{dataset}.contracts` c USING (contract_id)
+      JOIN `{dataset}.counterparties` cp USING (counterparty_id)
+      WHERE r.renewal_type = 'Non-Renewed'
+
+  # --- advanced (window / date-math) -------------------------------------------
+  - id: advanced-01
+    tier: advanced
+    question: "What is the average number of days between effective_date and execution_date for each contract type?"
+    gold_sql: |
+      SELECT contract_type, AVG(DATE_DIFF(execution_date, effective_date, DAY)) AS avg_days
+      FROM `{dataset}.contracts`
+      WHERE execution_date IS NOT NULL
+      GROUP BY contract_type
+
+  - id: advanced-02
+    tier: advanced
+    question: "For each business unit, which single contract has the highest total_value? Show business_unit_id, contract_id, and total_value."
+    gold_sql: |
+      SELECT business_unit_id, contract_id, total_value
+      FROM (
+        SELECT business_unit_id, contract_id, total_value,
+               ROW_NUMBER() OVER (PARTITION BY business_unit_id ORDER BY total_value DESC) AS rn
+        FROM `{dataset}.contracts`
+        WHERE total_value IS NOT NULL
+      )
+      WHERE rn = 1
+
+  - id: advanced-03
+    tier: advanced
+    question: "What is the total value of active contracts, broken down by currency?"
+    gold_sql: |
+      SELECT currency, SUM(total_value) AS total_value
+      FROM `{dataset}.contracts`
+      WHERE status IN ('Executed', 'Active')
+        AND status != 'Terminated'
+        AND (expiration_date IS NULL OR expiration_date >= CURRENT_DATE())
+      GROUP BY currency
+
+  - id: advanced-04
+    tier: advanced
+    question: "How many contracts expire within the next 90 days?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.contracts`
+      WHERE expiration_date IS NOT NULL
+        AND expiration_date BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 90 DAY)
+
+  # --- traps --------------------------------------------------------------------
+  - id: traps-01-missing-clause
+    tier: traps
+    question: "Which active contracts are missing an indemnification clause?"
+    gold_sql: |
+      SELECT c.contract_id
+      FROM `{dataset}.contracts` c
+      WHERE c.status IN ('Executed', 'Active')
+        AND c.status != 'Terminated'
+        AND (c.expiration_date IS NULL OR c.expiration_date >= CURRENT_DATE())
+        AND NOT EXISTS (
+          SELECT 1 FROM `{dataset}.clauses` cl
+          WHERE cl.contract_id = c.contract_id AND cl.clause_type = 'Indemnification'
+        )
+
+  - id: traps-02-name-normalization
+    tier: traps
+    question: "How many contracts do we have with Acme?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.contracts` c
+      JOIN `{dataset}.counterparties` cp USING (counterparty_id)
+      WHERE UPPER(cp.name) LIKE '%ACME%' OR UPPER(cp.legal_name) LIKE '%ACME%'
+
+  - id: traps-03-fiscal-year
+    tier: traps
+    question: "What is the total contract value signed last fiscal year?"
+    gold_sql: |
+      SELECT SUM(total_value) AS total_value
+      FROM `{dataset}.contracts`
+      WHERE fiscal_year = (
+        CASE WHEN EXTRACT(MONTH FROM CURRENT_DATE()) = 1
+             THEN EXTRACT(YEAR FROM CURRENT_DATE()) - 1
+             ELSE EXTRACT(YEAR FROM CURRENT_DATE())
+        END
+      )
+
+  - id: traps-04-notice-window
+    tier: traps
+    question: "Which auto-renewing contracts do we need to act on in the next 30 days to stop renewal?"
+    gold_sql: |
+      SELECT contract_id
+      FROM `{dataset}.contracts`
+      WHERE auto_renew
+        AND expiration_date IS NOT NULL
+        AND notice_period_days IS NOT NULL
+        AND DATE_SUB(expiration_date, INTERVAL notice_period_days DAY)
+            BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)
+
+  - id: traps-05-computed-active
+    tier: traps
+    question: "How many active contracts are there?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.contracts`
+      WHERE status IN ('Executed', 'Active')
+        AND status != 'Terminated'
+        AND (expiration_date IS NULL OR expiration_date >= CURRENT_DATE())
+
+  - id: traps-06-fuzzy-type
+    tier: traps
+    question: "How many NDAs are there?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.contracts`
+      WHERE contract_type IN ('NDA', 'Mutual NDA', 'Confidentiality Agreement')
+
+  - id: traps-07-ca-lol-missing
+    tier: traps
+    question: "Which California-governed MSAs are missing a Limitation of Liability clause?"
+    gold_sql: |
+      SELECT c.contract_id
+      FROM `{dataset}.contracts` c
+      WHERE c.contract_type = 'MSA'
+        AND c.governing_law = 'California'
+        AND NOT EXISTS (
+          SELECT 1 FROM `{dataset}.clauses` cl
+          WHERE cl.contract_id = c.contract_id
+            AND cl.clause_type = 'Limitation of Liability'
+        )
+
+  - id: traps-08-active-nda
+    tier: traps
+    question: "How many active NDAs are there?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.contracts`
+      WHERE contract_type IN ('NDA', 'Mutual NDA', 'Confidentiality Agreement')
+        AND status IN ('Executed', 'Active')
+        AND status != 'Terminated'
+        AND (expiration_date IS NULL OR expiration_date >= CURRENT_DATE())

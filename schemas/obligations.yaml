@@ -1,0 +1,26 @@
+table: obligations
+description: Deliverables, payments, and reporting duties tied to a contract.
+
+columns:
+  - name: obligation_id
+    type: STRING
+    description: Primary key.
+  - name: contract_id
+    type: STRING
+    description: Foreign key -> contracts.contract_id.
+  - name: obligation_type
+    type: STRING
+    description: Payment, Deliverable, Reporting, Renewal Notice, or Audit.
+  - name: description
+    type: STRING
+  - name: owner_user_id
+    type: STRING
+    description: Foreign key -> users.user_id.
+  - name: due_date
+    type: DATE
+  - name: status
+    type: STRING
+    description: Open, Completed, Overdue, or Waived.
+  - name: amount
+    type: NUMERIC
+    description: Nullable.
