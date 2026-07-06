@@ -20,6 +20,30 @@ questions:
       FROM `{dataset}.counterparties`
       WHERE risk_tier = 'High'
 
+  - id: filters-03
+    tier: filters
+    question: "How many contracts are denominated in EUR?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.contracts`
+      WHERE currency = 'EUR'
+
+  - id: filters-04
+    tier: filters
+    question: "How many counterparties are incorporated in Germany?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.counterparties`
+      WHERE country = 'Germany'
+
+  - id: filters-05
+    tier: filters
+    question: "How many obligations are still open?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.obligations`
+      WHERE status = 'Open'
+
   # --- joins ------------------------------------------------------------------
   - id: joins-01
     tier: joins
@@ -51,6 +75,34 @@ questions:
       JOIN `{dataset}.matters` m USING (matter_id)
       GROUP BY m.matter_type
 
+  - id: joins-04
+    tier: joins
+    question: "How many contracts do we hold with counterparties in each risk tier?"
+    gold_sql: |
+      SELECT cp.risk_tier, COUNT(*) AS contract_count
+      FROM `{dataset}.contracts` c
+      JOIN `{dataset}.counterparties` cp USING (counterparty_id)
+      GROUP BY cp.risk_tier
+
+  - id: joins-05
+    tier: joins
+    question: "How many contracts does each business-unit region manage?"
+    gold_sql: |
+      SELECT bu.region, COUNT(*) AS contract_count
+      FROM `{dataset}.contracts` c
+      JOIN `{dataset}.business_units` bu USING (business_unit_id)
+      GROUP BY bu.region
+
+  - id: joins-06
+    tier: joins
+    question: "List the display name of every counterparty that has had a contract non-renewed."
+    gold_sql: |
+      SELECT DISTINCT cp.name
+      FROM `{dataset}.renewals` r
+      JOIN `{dataset}.contracts` c USING (contract_id)
+      JOIN `{dataset}.counterparties` cp USING (counterparty_id)
+      WHERE r.renewal_type = 'Non-Renewed'
+
   # --- advanced (window / date-math) -------------------------------------------
   - id: advanced-01
     tier: advanced
@@ -73,6 +125,26 @@ questions:
         WHERE total_value IS NOT NULL
       )
       WHERE rn = 1
+
+  - id: advanced-03
+    tier: advanced
+    question: "What is the total value of active contracts, broken down by currency?"
+    gold_sql: |
+      SELECT currency, SUM(total_value) AS total_value
+      FROM `{dataset}.contracts`
+      WHERE status IN ('Executed', 'Active')
+        AND status != 'Terminated'
+        AND (expiration_date IS NULL OR expiration_date >= CURRENT_DATE())
+      GROUP BY currency
+
+  - id: advanced-04
+    tier: advanced
+    question: "How many contracts expire within the next 90 days?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.contracts`
+      WHERE expiration_date IS NOT NULL
+        AND expiration_date BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 90 DAY)
 
   # --- traps --------------------------------------------------------------------
   - id: traps-01-missing-clause
@@ -140,3 +212,28 @@ questions:
       SELECT COUNT(*) AS n
       FROM `{dataset}.contracts`
       WHERE contract_type IN ('NDA', 'Mutual NDA', 'Confidentiality Agreement')
+
+  - id: traps-07-ca-lol-missing
+    tier: traps
+    question: "Which California-governed MSAs are missing a Limitation of Liability clause?"
+    gold_sql: |
+      SELECT c.contract_id
+      FROM `{dataset}.contracts` c
+      WHERE c.contract_type = 'MSA'
+        AND c.governing_law = 'California'
+        AND NOT EXISTS (
+          SELECT 1 FROM `{dataset}.clauses` cl
+          WHERE cl.contract_id = c.contract_id
+            AND cl.clause_type = 'Limitation of Liability'
+        )
+
+  - id: traps-08-active-nda
+    tier: traps
+    question: "How many active NDAs are there?"
+    gold_sql: |
+      SELECT COUNT(*) AS n
+      FROM `{dataset}.contracts`
+      WHERE contract_type IN ('NDA', 'Mutual NDA', 'Confidentiality Agreement')
+        AND status IN ('Executed', 'Active')
+        AND status != 'Terminated'
+        AND (expiration_date IS NULL OR expiration_date >= CURRENT_DATE())

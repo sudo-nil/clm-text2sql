@@ -25,6 +25,26 @@ TIER_ORDER = ["filters", "joins", "advanced", "traps"]
 _ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
 
 
+def _has_top_level_order_by(sql: str) -> bool:
+    """True only if `sql` has an ORDER BY in its outermost query.
+
+    A naive substring match also fires on ORDER BY inside subqueries and
+    window functions (e.g. ROW_NUMBER() OVER (... ORDER BY ...)), which would
+    wrongly force an order-sensitive comparison on a result set that has no
+    defined row order. We only care about a trailing, top-level ORDER BY, so
+    we require the match to sit at parenthesis depth 0.
+    """
+    depths = []
+    depth = 0
+    for ch in sql:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        depths.append(depth)
+    return any(depths[m.start()] == 0 for m in _ORDER_BY_RE.finditer(sql))
+
+
 @dataclass
 class QuestionResult:
     id: str
@@ -96,7 +116,7 @@ def run_eval() -> list[QuestionResult]:
     results = []
     for q in load_questions():
         gold_sql = q["gold_sql"].format(dataset=settings.dataset)
-        order_sensitive = bool(_ORDER_BY_RE.search(gold_sql))
+        order_sensitive = _has_top_level_order_by(gold_sql)
 
         try:
             gold_result = executor.execute(gold_sql, apply_default_limit=False)
