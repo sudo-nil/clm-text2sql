@@ -1,0 +1,16 @@
+table: users
+description: Internal contract owners and legal staff.
+
+columns:
+  - name: user_id
+    type: STRING
+    description: Primary key.
+  - name: full_name
+    type: STRING
+    description: Display name.
+  - name: role
+    type: STRING
+    description: Legal Counsel, Contract Manager, Paralegal, or Procurement Lead.
+  - name: email
+    type: STRING
+    description: Work email address.

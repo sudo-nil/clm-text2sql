@@ -1,0 +1,18 @@
+table: matters
+description: Grouping of related contracts (e.g. a vendor onboarding or M&A matter).
+
+columns:
+  - name: matter_id
+    type: STRING
+    description: Primary key.
+  - name: name
+    type: STRING
+  - name: matter_type
+    type: STRING
+    description: Vendor Onboarding, M&A, Litigation, Financing, or Real Estate.
+  - name: lead_counsel_user_id
+    type: STRING
+    description: Foreign key -> users.user_id.
+  - name: status
+    type: STRING
+    description: Open or Closed.

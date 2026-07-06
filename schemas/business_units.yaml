@@ -1,0 +1,13 @@
+table: business_units
+description: Internal departments that own contracts.
+
+columns:
+  - name: business_unit_id
+    type: STRING
+    description: Primary key.
+  - name: name
+    type: STRING
+    description: Department name, e.g. "Sales", "Engineering", "Procurement", "HR", "Marketing", "Finance".
+  - name: region
+    type: STRING
+    description: NA, EMEA, or APAC.

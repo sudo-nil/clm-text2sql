@@ -1,0 +1,54 @@
+# Cross-table rules, foreign keys, and few-shot examples for the `clm`
+# dataset. Table-specific rules live alongside each table's own file
+# (contracts.yaml, clauses.yaml, counterparties.yaml); this file only holds
+# things that span more than one table or apply to every query.
+
+foreign_keys:
+  - "contracts.counterparty_id -> counterparties.counterparty_id"
+  - "contracts.business_unit_id -> business_units.business_unit_id"
+  - "contracts.owner_user_id -> users.user_id"
+  - "contracts.matter_id -> matters.matter_id (nullable)"
+  - "clauses.contract_id -> contracts.contract_id"
+  - "obligations.contract_id -> contracts.contract_id"
+  - "obligations.owner_user_id -> users.user_id"
+  - "renewals.contract_id -> contracts.contract_id"
+  - "matters.lead_counsel_user_id -> users.user_id"
+
+examples:
+  - question: How many contracts are governed by California law?
+    sql: |
+      SELECT COUNT(*) AS contract_count
+      FROM `{dataset}.contracts`
+      WHERE governing_law = 'California'
+
+  - question: List the top 5 counterparties by total contract value, showing their display name.
+    sql: |
+      SELECT cp.name, SUM(c.total_value) AS total_value
+      FROM `{dataset}.contracts` c
+      JOIN `{dataset}.counterparties` cp USING (counterparty_id)
+      GROUP BY cp.name
+      ORDER BY total_value DESC
+      LIMIT 5
+
+  - question: Which active contracts are missing an indemnification clause?
+    sql: |
+      SELECT c.contract_id, c.title
+      FROM `{dataset}.contracts` c
+      WHERE c.status IN ('Executed', 'Active')
+        AND c.status != 'Terminated'
+        AND (c.expiration_date IS NULL OR c.expiration_date >= CURRENT_DATE())
+        AND NOT EXISTS (
+          SELECT 1 FROM `{dataset}.clauses` cl
+          WHERE cl.contract_id = c.contract_id AND cl.clause_type = 'Indemnification'
+        )
+
+  - question: What is the total contract value signed last fiscal year?
+    sql: |
+      SELECT SUM(total_value) AS total_value
+      FROM `{dataset}.contracts`
+      WHERE fiscal_year = (
+        CASE WHEN EXTRACT(MONTH FROM CURRENT_DATE()) = 1
+             THEN EXTRACT(YEAR FROM CURRENT_DATE()) - 1
+             ELSE EXTRACT(YEAR FROM CURRENT_DATE())
+        END
+      )

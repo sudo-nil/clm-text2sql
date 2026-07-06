@@ -1,0 +1,101 @@
+table: contracts
+description: Central table -- one row per contract.
+
+columns:
+  - name: contract_id
+    type: STRING
+    description: Primary key.
+  - name: title
+    type: STRING
+  - name: contract_type
+    type: STRING
+    description: >
+      NDA, MSA, SOW, DPA, SaaS Subscription, License, Reseller, Employment,
+      Lease, or Amendment -- but see the fuzzy-type rule below.
+  - name: counterparty_id
+    type: STRING
+    description: Foreign key -> counterparties.counterparty_id.
+  - name: business_unit_id
+    type: STRING
+    description: Foreign key -> business_units.business_unit_id.
+  - name: owner_user_id
+    type: STRING
+    description: Foreign key -> users.user_id.
+  - name: matter_id
+    type: STRING
+    description: Foreign key -> matters.matter_id. Nullable.
+  - name: status
+    type: STRING
+    description: >
+      Draft, In Review, Executed, Active, Expired, or Terminated -- but see
+      the computed-"active" rule below; do not trust this column alone.
+  - name: governing_law
+    type: STRING
+    description: US state or country, e.g. "California", "England & Wales".
+  - name: effective_date
+    type: DATE
+  - name: execution_date
+    type: DATE
+    description: Nullable -- null means not yet executed.
+  - name: expiration_date
+    type: DATE
+    description: Nullable -- null means perpetual / no fixed expiration.
+  - name: total_value
+    type: NUMERIC
+    description: Nullable.
+  - name: currency
+    type: STRING
+    description: USD, EUR, or GBP.
+  - name: auto_renew
+    type: BOOL
+  - name: renewal_term_months
+    type: INT64
+    description: Nullable.
+  - name: notice_period_days
+    type: INT64
+    description: >
+      Nullable. Notice required before expiration_date to stop an
+      auto-renewal -- see the notice-window rule below.
+  - name: fiscal_year
+    type: INT64
+    description: >
+      Precomputed. See the fiscal-year rule below -- do not derive this
+      yourself from effective_date/execution_date.
+  - name: created_at
+    type: TIMESTAMP
+
+rules:
+  - >
+    FISCAL YEAR: the company fiscal year runs Feb 1 - Jan 31 and is labeled
+    by the calendar year it ENDS in (e.g. Feb 2024 through Jan 2025 is
+    FY2025). Prefer the `fiscal_year` column over deriving FY yourself from
+    effective_date/execution_date.
+  - >
+    RELATIVE FISCAL YEAR: when a question refers to "this/last/current
+    fiscal year" rather than a literal FY number, compute the CURRENT fiscal
+    year as: CASE WHEN EXTRACT(MONTH FROM CURRENT_DATE()) = 1 THEN
+    EXTRACT(YEAR FROM CURRENT_DATE()) ELSE EXTRACT(YEAR FROM CURRENT_DATE())
+    + 1 END. "This fiscal year" is that value; "last fiscal year" is that
+    value minus 1. Use this CASE expression exactly -- do not approximate it
+    with DATE_ADD/DATE_SUB month-shifting, which gives the wrong year
+    whenever the current month isn't December or January.
+  - >
+    "ACTIVE" CONTRACTS: unless the question specifies otherwise, a contract
+    is active when: status IN ('Executed', 'Active') AND status !=
+    'Terminated' AND (expiration_date IS NULL OR expiration_date >=
+    CURRENT_DATE()). Do not rely on the status string alone -- it can lag
+    behind the dates.
+  - >
+    NOTICE WINDOW: the deadline to act to stop an auto-renewal is
+    expiration_date - notice_period_days, not expiration_date itself, e.g.
+    DATE_SUB(expiration_date, INTERVAL notice_period_days DAY).
+  - >
+    FUZZY CONTRACT TYPES: a minority of NDA rows are stored under a
+    realistic synonym instead of the literal type "NDA": "Mutual NDA" and
+    "Confidentiality Agreement" are both NDAs. Match all three literal
+    values for a general NDA question, e.g. contract_type IN ('NDA',
+    'Mutual NDA', 'Confidentiality Agreement').
+  - >
+    Dates are relative to "now" -- this dataset is regenerated "now"-
+    anchored, so always use CURRENT_DATE() for today/next-N-days/overdue
+    style questions, never a hardcoded date literal.
