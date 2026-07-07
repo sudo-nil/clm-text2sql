@@ -1,15 +1,29 @@
 # clm-text2sql
 
-A text-to-SQL agent for a synthetic **Contract Lifecycle Management (CLM)**
-database on BigQuery. Ask a natural-language question about contracts,
-clauses, obligations, and renewals; get back an answer table and the exact
-SQL that produced it, as a citation.
+A production-minded **text-to-SQL agent** over a synthetic **Contract Lifecycle
+Management (CLM)** database on BigQuery. Ask a natural-language question about
+contracts, clauses, obligations, and renewals; get back an answer table and the
+exact SQL that produced it, as a citation.
 
-The centerpiece is the schema itself and the evaluation harness: the
-synthetic data deliberately bakes in the messy realities of a real CLM
-system (fuzzy contract-type naming, inconsistent legal-entity casing, a
-non-calendar fiscal year, a clause-presence model instead of boolean flags)
-so that "getting the SQL right" actually means something.
+The hard parts of text-to-SQL aren't the happy-path `SELECT`s — they're schema
+modeling, domain semantics, guardrails, and *measuring* correctness rather than
+eyeballing it. So the centerpiece is the schema design and the evaluation
+harness: the synthetic data deliberately bakes in the messy realities of a real
+CLM system (fuzzy contract-type naming, inconsistent legal-entity casing, a
+non-calendar fiscal year, a clause-presence model instead of boolean flags) so
+that "getting the SQL right" actually means something — and every one of those
+traps is scored, not just asserted.
+
+## Project Competencies
+
+| Competency | Where to look |
+| --- | --- |
+| **Schema-as-data grounding** — table/column semantics and domain "gotcha" rules live in declarative YAML rendered into the model's context; no hand-written prompt string per table | `schemas/*.yaml`, `app/schema.py` |
+| **Agentic generation with self-repair** — a LangGraph loop: generate → dry-run validate → feed the BigQuery error back and retry | `app/agent.py` |
+| **Execution-accuracy evaluation** — result-set comparison against curated `gold_sql`, tiered by difficulty, order- and extra-column-tolerant, with a per-tier scorecard | `eval/run.py`, `eval/questions.yaml` |
+| **Adversarial test design** — a dedicated `traps` tier encoding the specific, predictable ways a naive model gets CLM questions wrong | "Failure modes: the traps" below |
+| **Safety guardrails** — SELECT-only, single-statement, dataset-scoped, byte-capped execution enforced in code, not just prompted | `app/bq.py` |
+| **Reproducibility** — seeded, "now"-anchored synthetic data that regenerates byte-identically | `data_gen/` |
 
 ## Architecture
 
@@ -33,7 +47,9 @@ tests/      pure-function unit tests (guardrails, prompt building, eval comparis
 **Schema as data**: every table's columns and "gotcha" rules (fiscal year,
 clause-presence anti-join, fuzzy NDA types, ...) live in `schemas/*.yaml`
 rather than in Python -- `app/schema.py` is just a loader/renderer. Add or
-edit a table by editing its YAML file; no code changes needed.
+edit a table by editing its YAML file; no code changes needed. This keeps the
+model's grounding auditable and diffable, and it's why adding a new domain rule
+is a documentation change, not a prompt-engineering one.
 
 **Agent loop** (`app/agent.py`) is a LangGraph `StateGraph` with four nodes:
 
@@ -111,16 +127,29 @@ self-repair), and up to 50 rows.
 
 ## Run the eval
 
+The evaluation harness is the heart of the demonstration: it's how "the agent
+writes good SQL" becomes a measured claim instead of a vibe.
+
 ```bash
 uv run python -m eval.run
 ```
 
 Runs every question in `eval/questions.yaml` through both `gold_sql` and the
-agent, and compares result sets (order-insensitive unless `gold_sql` has an
-explicit `ORDER BY`; tolerant of the agent selecting extra descriptive
+agent, and compares result sets (order-insensitive unless `gold_sql` has a
+top-level `ORDER BY`; tolerant of the agent selecting extra descriptive
 columns beyond what gold selected). Prints an overall + per-tier scorecard,
-plus expected-vs-actual diffs for anything that fails. Current scorecard:
-**13/13 (100%)** across `filters`, `joins`, `advanced`, and `traps`.
+plus expected-vs-actual diffs for anything that fails.
+
+The suite currently spans **23 questions across four difficulty tiers**:
+
+| Tier | Count | What it probes |
+| --- | --- | --- |
+| `filters` | 5 | single-table predicates on the right column/value |
+| `joins` | 6 | foreign-key joins, grouping, multi-hop paths (incl. `renewals`) |
+| `advanced` | 4 | window functions, date math, computed-status aggregation |
+| `traps` | 8 | the domain gotchas below, incl. compound/correlated variants |
+
+Run the harness against your loaded dataset to get the live scorecard.
 
 Add more questions to `eval/questions.yaml` to expand coverage -- each just
 needs `{id, question, gold_sql, tier}`, and `gold_sql` should use
@@ -133,11 +162,16 @@ since the data is regenerated "now"-anchored.
 uv run pytest
 ```
 
-## Failure modes: the six traps
+## Failure modes: the traps
 
-A naive text-to-SQL model gets each of these wrong in a specific,
-predictable way. Here's what breaks, and how the schema/prompt/agent handles
-it.
+This is where the text-to-SQL expertise is on display. A naive text-to-SQL
+model gets each of these wrong in a specific, predictable way. Here's what
+breaks, and how the schema/prompt/agent handles it. The first six are the
+canonical single-issue traps; the `traps` tier also includes harder
+**compound and correlated** variants (e.g. a California-governed contract that
+drops its Limitation-of-Liability clause at an elevated rate, and an
+"active NDA" query that requires the fuzzy-type *and* computed-active fixes at
+once).
 
 **1. Missing-clause anti-join** -- *"Which active contracts are missing an
 indemnification clause?"* `clauses` only has a row when a clause is
@@ -183,7 +217,7 @@ Agreement") instead of the literal string "NDA". Fix: the fuzzy-type rule in
 `schemas/contracts.yaml` lists the synonym set and tells the model to match
 all of them for an "NDA" question.
 
-All six are covered by dedicated `traps` tier questions in
+All of these are covered by dedicated `traps` tier questions in
 `eval/questions.yaml`, scored separately from `filters`/`joins`/`advanced` so
 regressions in trap-handling are visible even if overall accuracy looks
 fine.
