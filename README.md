@@ -123,7 +123,28 @@ uv run python -m app.cli "Which NDAs auto-renew in the next 90 days?"
 ```
 
 Prints the row count, bytes billed, the final SQL used (including any
-self-repair), and up to 50 rows.
+self-repair), and up to 50 rows. A real run -- note the agent handles two
+traps at once here, expanding the fuzzy NDA synonyms *and* applying the
+computed-"active" definition rather than trusting `status` alone:
+
+```
+$ uv run python -m app.cli "How many active NDAs are there?"
+
+Question: How many active NDAs are there?
+
+SQL:
+SELECT COUNT(*) AS active_nda_count
+FROM `clm.contracts`
+WHERE contract_type IN ('NDA', 'Mutual NDA', 'Confidentiality Agreement')
+  AND status IN ('Executed', 'Active')
+  AND status != 'Terminated'
+  AND (expiration_date IS NULL OR expiration_date >= CURRENT_DATE())
+LIMIT 1000
+
+1 row(s), 10,485,760 bytes billed
+
+{'active_nda_count': 387}
+```
 
 ## Run the eval
 
@@ -149,7 +170,19 @@ The suite currently spans **23 questions across four difficulty tiers**:
 | `advanced` | 4 | window functions, date math, computed-status aggregation |
 | `traps` | 8 | the domain gotchas below, incl. compound/correlated variants |
 
-Run the harness against your loaded dataset to get the live scorecard.
+A real run against the loaded dataset (Gemini 2.5 Pro):
+
+```
+======================================================================
+EXECUTION ACCURACY SCORECARD
+======================================================================
+Overall: 23/23 (100.0%)
+
+     filters: 5/5 (100.0%)
+       joins: 6/6 (100.0%)
+    advanced: 4/4 (100.0%)
+       traps: 8/8 (100.0%)
+```
 
 Add more questions to `eval/questions.yaml` to expand coverage -- each just
 needs `{id, question, gold_sql, tier}`, and `gold_sql` should use
