@@ -24,7 +24,11 @@ _FORBIDDEN_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 _LEADING_KEYWORD = re.compile(r"^\s*(SELECT|WITH)\b", re.IGNORECASE)
-_TOP_LEVEL_LIMIT = re.compile(r"\bLIMIT\s+\d+\s*$", re.IGNORECASE)
+_TOP_LEVEL_LIMIT = re.compile(r"\bLIMIT\s+\d+\s*(?:OFFSET\s+\d+\s*)?$", re.IGNORECASE)
+# Single/double-quoted string literals (with backslash escapes). Blanked out
+# before keyword/`;` scanning so literals like `WHERE action = 'DELETE'` or a
+# `;` inside a string don't trip the guardrails.
+_STRING_LITERAL = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"", re.DOTALL)
 
 
 class GuardrailViolation(Exception):
@@ -48,9 +52,10 @@ class ExecutionResult:
 
 def enforce_select_only(sql: str) -> None:
     stripped = sql.strip().rstrip(";")
-    if ";" in stripped:
+    code = _STRING_LITERAL.sub("", stripped)  # scan keywords/`;` outside string literals
+    if ";" in code:
         raise GuardrailViolation("Multiple statements are not allowed.")
-    if _FORBIDDEN_KEYWORDS.search(stripped):
+    if _FORBIDDEN_KEYWORDS.search(code):
         raise GuardrailViolation("Only SELECT queries are allowed (found a DML/DDL keyword).")
     if not _LEADING_KEYWORD.match(stripped):
         raise GuardrailViolation("Query must start with SELECT or WITH.")
@@ -89,8 +94,8 @@ class BigQueryExecutor:
                 )
 
     def dry_run(self, sql: str) -> DryRunResult:
-        enforce_select_only(sql)
         try:
+            enforce_select_only(sql)
             job = self.client.query(sql, job_config=self._job_config(dry_run=True))
             self._check_dataset_scope(job)
         except GuardrailViolation as e:
@@ -102,6 +107,10 @@ class BigQueryExecutor:
     def execute(self, sql: str, apply_default_limit: bool = True) -> ExecutionResult:
         enforce_select_only(sql)
         final_sql = add_default_limit(sql) if apply_default_limit else sql
+        # Dataset-scope guardrail: a dry-run resolves referenced tables without
+        # billing bytes, so out-of-dataset queries are rejected before we spend.
+        probe = self.client.query(final_sql, job_config=self._job_config(dry_run=True))
+        self._check_dataset_scope(probe)
         job = self.client.query(final_sql, job_config=self._job_config(dry_run=False))
         result = job.result()
         rows = [dict(row) for row in result]
