@@ -16,7 +16,11 @@ def main() -> None:
     question = sys.argv[1]
 
     agent = Text2SqlAgent()
-    execution, generation = agent.answer(question)
+    try:
+        execution, generation = agent.answer(question)
+    except Exception as e:  # surface a clean message instead of a raw traceback
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
 
     print(f"Question: {question}\n")
     print("SQL:")

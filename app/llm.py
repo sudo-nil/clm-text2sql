@@ -32,4 +32,11 @@ class GeminiLLM:
             model=self.settings.model,
             contents=prompt,
         )
-        return response.text
+        text = response.text
+        if not text:
+            # .text is None/empty when the response has no text part -- a safety
+            # block, an empty candidate, or truncation. Fail with the reason
+            # rather than letting a None flow downstream into a cryptic error.
+            finish = response.candidates[0].finish_reason if response.candidates else None
+            raise RuntimeError(f"Gemini returned no text (finish_reason={finish}).")
+        return text

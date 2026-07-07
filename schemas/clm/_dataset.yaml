@@ -3,6 +3,18 @@
 # (contracts.yaml, clauses.yaml, counterparties.yaml); this file only holds
 # things that span more than one table or apply to every query.
 
+# Order tables appear in the prompt. Optional -- omit to fall back to the
+# alphabetical order of the *.yaml files in this folder.
+tables:
+  - business_units
+  - users
+  - counterparties
+  - matters
+  - contracts
+  - clauses
+  - obligations
+  - renewals
+
 foreign_keys:
   - "contracts.counterparty_id -> counterparties.counterparty_id"
   - "contracts.business_unit_id -> business_units.business_unit_id"
