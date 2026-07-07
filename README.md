@@ -28,12 +28,17 @@ traps is scored, not just asserted.
 ## Architecture
 
 ```
-schemas/    one YAML per table (columns + table-specific value hints) + _dataset.yaml
-            (foreign keys + few-shot examples) -- see schemas/example.yaml for the format
+schemas/
+  <dataset>/         one folder per dataset (e.g. schemas/clm/)
+    <table>.yaml     columns + table-specific value hints, one file per table
+    _dataset.yaml    table order + foreign keys + few-shot examples
+  example.yaml       the file format, annotated -- see this first
+tools/
+  create_schema.py   introspect the datasets in BQ_DATASETS -> schemas/<dataset>/*.yaml
 data_gen/   synthetic CLM data generator (Faker + numpy, seeded) -> Parquet -> BigQuery
 app/
   config.py     env-driven settings (project/location/dataset/model)
-  schema.py     loads schemas/*.yaml, renders schema description + value hints
+  schema.py     loads schemas/<dataset>/, renders schema description + value hints
   llm.py        swappable LLM interface (Vertex AI Gemini via google-genai)
   bq.py         BigQuery execution layer: guardrails, dry-run, execute
   agent.py      LangGraph StateGraph: generate -> dry-run validate -> self-repair
@@ -45,11 +50,15 @@ tests/      pure-function unit tests (guardrails, prompt building, eval comparis
 ```
 
 **Schema as data**: every table's columns and "gotcha" rules (fiscal year,
-clause-presence anti-join, fuzzy NDA types, ...) live in `schemas/*.yaml`
-rather than in Python -- `app/schema.py` is just a loader/renderer. Add or
-edit a table by editing its YAML file; no code changes needed. This keeps the
-model's grounding auditable and diffable, and it's why adding a new domain rule
-is a documentation change, not a prompt-engineering one.
+clause-presence anti-join, fuzzy NDA types, ...) live in
+`schemas/<dataset>/*.yaml` rather than in Python -- `app/schema.py` is just a
+loader/renderer, resolving the folder from the active dataset name. Add or edit
+a table by editing its YAML file; no code changes needed. Point the agent at a
+new dataset by dropping in a `schemas/<name>/` folder --
+`python -m tools.create_schema` scaffolds one from live BigQuery metadata, and
+you fill in the descriptions and rules by hand. This keeps the model's grounding
+auditable and diffable, and it's why adding a new domain rule is a documentation
+change, not a prompt-engineering one.
 
 **Agent loop** (`app/agent.py`) is a LangGraph `StateGraph` with four nodes:
 
