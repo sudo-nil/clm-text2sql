@@ -8,6 +8,7 @@ Run: python -m data_gen.generate
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import os
 from decimal import Decimal
 
@@ -15,7 +16,10 @@ import numpy as np
 import pandas as pd
 from faker import Faker
 
+from app.logging_config import configure_logging
 from data_gen import reference_data as ref
+
+logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 
@@ -343,6 +347,7 @@ def build_renewals(rng: np.random.Generator, contracts: pd.DataFrame) -> pd.Data
 
 
 def main() -> None:
+    configure_logging()
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     Faker.seed(ref.SEED)
     fake = Faker()
@@ -376,7 +381,7 @@ def main() -> None:
             df[col] = df[col].apply(to_money)
         path = os.path.join(OUTPUT_DIR, f"{name}.parquet")
         df.to_parquet(path, index=False)
-        print(f"{name:>15}: {len(df):>6} rows -> {path}")
+        logger.info("%15s: %6d rows -> %s", name, len(df), path)
 
 
 if __name__ == "__main__":

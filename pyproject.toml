@@ -14,14 +14,12 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "db-dtypes>=1.2.0",
     "langgraph>=0.2.0",
+    "tenacity>=9.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.2.0",
-]
-ui = [
-    "streamlit>=1.35.0",
 ]
 
 [tool.pytest.ini_options]

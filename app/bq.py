@@ -8,6 +8,7 @@ Guardrails enforced here (not just prompted for in the LLM):
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 
@@ -15,6 +16,8 @@ from google.api_core.exceptions import GoogleAPIError
 from google.cloud import bigquery
 
 from app.config import Settings
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_BYTES_BILLED = 1_000_000_000  # 1 GB -- generous for this dataset's size
 DEFAULT_ROW_LIMIT = 1000
@@ -54,10 +57,13 @@ def enforce_select_only(sql: str) -> None:
     stripped = sql.strip().rstrip(";")
     code = _STRING_LITERAL.sub("", stripped)  # scan keywords/`;` outside string literals
     if ";" in code:
+        logger.warning("Guardrail rejected multi-statement query: %s", sql)
         raise GuardrailViolation("Multiple statements are not allowed.")
     if _FORBIDDEN_KEYWORDS.search(code):
+        logger.warning("Guardrail rejected DML/DDL query: %s", sql)
         raise GuardrailViolation("Only SELECT queries are allowed (found a DML/DDL keyword).")
     if not _LEADING_KEYWORD.match(stripped):
+        logger.warning("Guardrail rejected non-SELECT/WITH query: %s", sql)
         raise GuardrailViolation("Query must start with SELECT or WITH.")
 
 
@@ -88,6 +94,10 @@ class BigQueryExecutor:
         allowed = (self.settings.project, self.settings.dataset)
         for table in job.referenced_tables or []:
             if (table.project, table.dataset_id) != allowed:
+                logger.warning(
+                    "Guardrail rejected out-of-dataset reference: `%s.%s.%s` (allowed: `%s.%s`)",
+                    table.project, table.dataset_id, table.table_id, allowed[0], allowed[1],
+                )
                 raise GuardrailViolation(
                     f"Query references `{table.project}.{table.dataset_id}.{table.table_id}`, "
                     f"outside the allowed dataset `{allowed[0]}.{allowed[1]}`."

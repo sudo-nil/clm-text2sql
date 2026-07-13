@@ -8,6 +8,7 @@ guardrail options.
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Optional, TypedDict
@@ -18,6 +19,8 @@ from app.bq import BigQueryExecutor, ExecutionResult
 from app.config import Settings
 from app.llm import LLM, GeminiLLM
 from app.schema import build_few_shot_examples, build_schema_context
+
+logger = logging.getLogger(__name__)
 
 PROMPT_TEMPLATE = """
 You are a meticulous BigQuery SQL analyst for an in-house legal team's Contract
@@ -132,11 +135,18 @@ class Text2SqlAgent:
         return {"dry_run_error": dry_run.error or "unknown error"}
 
     def _node_repair(self, state: AgentState) -> dict:
+        logger.warning(
+            "Dry-run validation failed (attempt %d): %s", state["attempts"], state["dry_run_error"]
+        )
         sql = self._repair(state["question"], state["sql"], state["dry_run_error"])
         history = [*state.get("repair_history", []), state["dry_run_error"]]
         return {"sql": sql, "attempts": state["attempts"] + 1, "repair_history": history}
 
     def _node_fail(self, state: AgentState) -> dict:
+        logger.error(
+            "Giving up after %d attempt(s), question=%r, last error=%s",
+            state["attempts"], state["question"], state["dry_run_error"],
+        )
         raise RuntimeError(
             f"SQL failed validation after {state['attempts']} attempt(s): {state['dry_run_error']}\n"
             f"Last SQL:\n{state['sql']}"
