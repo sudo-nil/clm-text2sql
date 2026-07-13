@@ -4,16 +4,32 @@ everything else should type against the LLM protocol so the backing model
 """
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
 from google import genai
+from google.genai import errors
+from tenacity import before_sleep_log, retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class LLM(Protocol):
     def generate(self, prompt: str) -> str:
         ...
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """5xx is always worth retrying; 429 (rate limit) is a 4xx in google-genai's
+    scheme but is also transient. Other 4xx (bad request, auth, not found) are
+    not -- retrying those just wastes the repair budget on a bug that won't
+    fix itself.
+    """
+    if isinstance(exc, errors.ServerError):
+        return True
+    return isinstance(exc, errors.ClientError) and exc.code == 429
 
 
 class GeminiLLM:
@@ -27,11 +43,25 @@ class GeminiLLM:
             location=self.settings.location,
         )
 
-    def generate(self, prompt: str) -> str:
-        response = self._client.models.generate_content(
+    @retry(
+        retry=retry_if_exception(_is_transient),
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=1, min=1, max=20),
+        reraise=True,
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+    )
+    def _generate_content(self, prompt: str):
+        return self._client.models.generate_content(
             model=self.settings.model,
             contents=prompt,
         )
+
+    def generate(self, prompt: str) -> str:
+        try:
+            response = self._generate_content(prompt)
+        except (errors.ServerError, errors.ClientError) as e:
+            logger.warning("Gemini call failed after retries: %s", e)
+            raise
         text = response.text
         if not text:
             # .text is None/empty when the response has no text part -- a safety

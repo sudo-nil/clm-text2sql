@@ -7,13 +7,17 @@ Run: python -m data_gen.load_bq
 """
 from __future__ import annotations
 
+import logging
 import os
 
 from google.cloud import bigquery
 
 from app.config import Settings
+from app.logging_config import configure_logging
 from data_gen.bq_schema import CLUSTERING_FIELDS, LOAD_ORDER, TABLES
 from data_gen.generate import OUTPUT_DIR
+
+logger = logging.getLogger(__name__)
 
 SHOWCASE_QUERIES = {
     "missing_lol_in_ca": """
@@ -52,7 +56,7 @@ def ensure_dataset(client: bigquery.Client, settings: Settings) -> None:
     dataset = bigquery.Dataset(dataset_ref)
     dataset.location = settings.location
     client.create_dataset(dataset, exists_ok=True)
-    print(f"[dataset] {settings.project}.{settings.dataset} ready in {settings.location}")
+    logger.info("[dataset] %s.%s ready in %s", settings.project, settings.dataset, settings.location)
 
 
 def recreate_table(client: bigquery.Client, settings: Settings, table_name: str) -> bigquery.TableReference:
@@ -100,6 +104,7 @@ def run_verification(client: bigquery.Client, settings: Settings) -> None:
 
 
 def main() -> None:
+    configure_logging()
     settings = Settings.load()
     client = bigquery.Client(project=settings.project)
 
@@ -107,7 +112,7 @@ def main() -> None:
     for table_name in LOAD_ORDER:
         table_ref = recreate_table(client, settings, table_name)
         n = load_table(client, table_ref, table_name)
-        print(f"[load] {table_name}: {n} rows")
+        logger.info("[load] %s: %d rows", table_name, n)
 
     run_verification(client, settings)
 

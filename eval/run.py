@@ -8,6 +8,7 @@ Run: python -m eval.run
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from itertools import combinations
@@ -18,6 +19,9 @@ import yaml
 from app.agent import Text2SqlAgent
 from app.bq import BigQueryExecutor
 from app.config import Settings
+from app.logging_config import configure_logging
+
+logger = logging.getLogger(__name__)
 
 QUESTIONS_PATH = Path(__file__).parent / "questions.yaml"
 TIER_ORDER = ["filters", "joins", "advanced", "traps"]
@@ -113,14 +117,16 @@ def run_eval() -> list[QuestionResult]:
     agent = Text2SqlAgent(settings=settings)
     executor = BigQueryExecutor(settings=settings)
 
+    questions = load_questions()
     results = []
-    for q in load_questions():
+    for i, q in enumerate(questions, start=1):
         gold_sql = q["gold_sql"].format(dataset=settings.dataset)
         order_sensitive = _has_top_level_order_by(gold_sql)
 
         try:
             gold_result = executor.execute(gold_sql, apply_default_limit=False)
         except Exception as e:
+            logger.error("[%d/%d] %s: gold_sql failed: %s", i, len(questions), q["id"], e)
             results.append(QuestionResult(
                 id=q["id"], tier=q["tier"], question=q["question"],
                 passed=False, error=f"gold_sql failed: {e}", gold_sql=gold_sql,
@@ -131,12 +137,14 @@ def run_eval() -> list[QuestionResult]:
             generation = agent.generate_validated_sql(q["question"])
             gen_result = executor.execute(generation.sql, apply_default_limit=False)
             passed = rows_equal(gold_result.rows, gen_result.rows, order_sensitive)
+            logger.info("[%d/%d] %s: %s", i, len(questions), q["id"], "PASS" if passed else "FAIL")
             results.append(QuestionResult(
                 id=q["id"], tier=q["tier"], question=q["question"], passed=passed,
                 generated_sql=generation.sql, gold_sql=gold_sql,
                 expected=gold_result.rows, actual=gen_result.rows,
             ))
         except Exception as e:
+            logger.error("[%d/%d] %s: FAIL (%s)", i, len(questions), q["id"], e)
             results.append(QuestionResult(
                 id=q["id"], tier=q["tier"], question=q["question"],
                 passed=False, error=str(e), gold_sql=gold_sql,
@@ -179,6 +187,7 @@ def print_scorecard(results: list[QuestionResult]) -> None:
 
 
 def main() -> None:
+    configure_logging()
     results = run_eval()
     print_scorecard(results)
 
